@@ -1,8 +1,8 @@
 <script setup lang="ts">
 interface Props {
-  currentSource: 'microphone' | 'file' | null
-  webglSupported: boolean
-  webglError?: string | null
+  currentSource: any
+  isInitialized: boolean
+  error: string | null
 }
 
 defineProps<Props>()
@@ -11,10 +11,10 @@ defineProps<Props>()
 <template>
   <!-- Audio Source Status -->
   <div class="status">
-    <p v-if="currentSource === 'microphone'" class="status-mic">
+    <p v-if="currentSource && currentSource.name === 'UserMedia'" class="status-mic">
       🎤 Using microphone input
     </p>
-    <p v-else-if="currentSource === 'file'" class="status-file">
+    <p v-else-if="currentSource && currentSource.name === 'Player'" class="status-file">
       📁 Using audio file input
     </p>
     <p v-else class="status-none">
@@ -22,23 +22,23 @@ defineProps<Props>()
     </p>
   </div>
 
-  <!-- WebGL Support Status -->
-  <div class="visualizer-container">
-    <div v-if="webglSupported" class="webgl-status">
-      🎨 WebGL Mode Active
+  <!-- Initialization Status -->
+  <div class="init-status">
+    <div v-if="isInitialized && !error" class="status-success">
+      ✅ Audio system initialized
     </div>
-    <div v-else-if="webglError" class="webgl-error">
-      ❌ WebGL Error: {{ webglError }}
+    <div v-else-if="error" class="status-error">
+      ❌ Error: {{ error }}
     </div>
-    <div v-else class="canvas-status">
-      🖼️ Canvas2D Mode Active (WebGL not supported)
+    <div v-else class="status-loading">
+      🔄 Initializing audio system...
     </div>
   </div>
 </template>
 
 <style scoped>
 .status {
-  margin-bottom: 2rem;
+  margin-bottom: 1rem;
   text-align: center;
 }
 
@@ -51,9 +51,9 @@ defineProps<Props>()
 }
 
 .status-mic {
-  background: rgba(100, 255, 218, 0.1);
-  border: 1px solid rgba(100, 255, 218, 0.3);
-  color: #64ffda;
+  background: rgba(100, 181, 246, 0.1);
+  border: 1px solid rgba(100, 181, 246, 0.3);
+  color: var(--accent-color);
 }
 
 .status-file {
@@ -63,18 +63,18 @@ defineProps<Props>()
 }
 
 .status-none {
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  color: #ccc;
+  background: var(--control-bg);
+  border: 1px solid var(--border-color);
+  color: var(--text-secondary);
 }
 
-.visualizer-container {
-  margin-bottom: 2rem;
+.init-status {
+  margin-bottom: 1rem;
 }
 
-.webgl-status,
-.webgl-error,
-.canvas-status {
+.status-success,
+.status-error,
+.status-loading {
   text-align: center;
   padding: 0.75rem;
   border-radius: 8px;
@@ -82,19 +82,19 @@ defineProps<Props>()
   font-size: 0.9rem;
 }
 
-.webgl-status {
-  background: rgba(100, 255, 218, 0.1);
-  border: 1px solid rgba(100, 255, 218, 0.3);
-  color: #64ffda;
+.status-success {
+  background: rgba(76, 175, 80, 0.1);
+  border: 1px solid rgba(76, 175, 80, 0.3);
+  color: #4caf50;
 }
 
-.webgl-error {
-  background: rgba(255, 107, 107, 0.1);
-  border: 1px solid rgba(255, 107, 107, 0.3);
-  color: #ff6b6b;
+.status-error {
+  background: rgba(244, 67, 54, 0.1);
+  border: 1px solid rgba(244, 67, 54, 0.3);
+  color: #f44336;
 }
 
-.canvas-status {
+.status-loading {
   background: rgba(255, 193, 7, 0.1);
   border: 1px solid rgba(255, 193, 7, 0.3);
   color: #ffc107;

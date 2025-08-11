@@ -1,72 +1,97 @@
 <script setup lang="ts">
+import CollapsibleSection from '../ui/CollapsibleSection.vue'
 import MicrophoneControls from './MicrophoneControls.vue'
 import FileUploadControls from './FileUploadControls.vue'
-import VisualizationParameters from './VisualizationParameters.vue'
-import type { AudioInputDevice } from '../../lib/audio'
 
 interface Props {
-  audioDevices: AudioInputDevice[]
-  selectedDeviceId: string
   isMicActive: boolean
+  canUseMic: boolean
   audioFile: File | null
-  currentAnalyser: AnalyserNode | null
-  audioElement: HTMLAudioElement | undefined
-  sensitivity: number
-  decay: number
-  frequencyMapping: 'logarithmic' | 'linear'
+  isPlaying: boolean
+  duration: number
+  currentTime: number
+  error: string | null
 }
 
 interface Emits {
-  (e: 'device-change', deviceId: string): void
   (e: 'start-microphone'): void
-  (e: 'file-upload', event: Event): void
-  (e: 'audio-error', event: Event): void
-  (e: 'audio-element-ready', element: HTMLAudioElement): void
-  (e: 'sensitivity-change', event: Event): void
-  (e: 'decay-change', event: Event): void
-  (e: 'frequency-mapping-change', value: 'logarithmic' | 'linear'): void
-  (e: 'reset-peaks'): void
-  (e: 'test-reactivity'): void
+  (e: 'stop-microphone'): void
+  (e: 'file-upload', file: File | null): void
+  (e: 'play'): void
+  (e: 'pause'): void
+  (e: 'stop'): void
+  (e: 'seek', time: number): void
 }
 
-defineProps<Props>()
-defineEmits<Emits>()
+const props = defineProps<Props>()
+const emit = defineEmits<Emits>()
+
+const startMicrophone = () => {
+  emit('start-microphone')
+}
+
+const stopMicrophone = () => {
+  emit('stop-microphone')
+}
+
+const handleFileUpload = (file: File | null) => {
+  emit('file-upload', file)
+}
+
+const handlePlay = () => {
+  emit('play')
+}
+
+const handlePause = () => {
+  emit('pause')
+}
+
+const handleStop = () => {
+  emit('stop')
+}
+
+const handleSeek = (time: number) => {
+  emit('seek', time)
+}
 </script>
 
 <template>
-  <div class="controls">
-    <MicrophoneControls
-      :audio-devices="audioDevices"
-      :selected-device-id="selectedDeviceId"
-      :is-mic-active="isMicActive"
-      @device-change="$emit('device-change', $event)"
-      @start-microphone="$emit('start-microphone')"
-    />
-    
-    <FileUploadControls
-      :audio-file="audioFile"
-      :current-analyser="currentAnalyser"
-      :audio-element="audioElement"
-      @file-upload="$emit('file-upload', $event)"
-      @audio-error="$emit('audio-error', $event)"
-      @audio-element-ready="$emit('audio-element-ready', $event)"
-    />
-    
-    <VisualizationParameters
-      :sensitivity="sensitivity"
-      :decay="decay"
-      :frequency-mapping="frequencyMapping"
-      @sensitivity-change="$emit('sensitivity-change', $event)"
-      @decay-change="$emit('decay-change', $event)"
-      @frequency-mapping-change="$emit('frequency-mapping-change', $event)"
-      @reset-peaks="$emit('reset-peaks')"
-      @test-reactivity="$emit('test-reactivity')"
-    />
+  <div class="controls-container">
+    <CollapsibleSection title="Audio Controls" id="audio-controls" :default-expanded="true">
+      <div class="controls-content">
+        <MicrophoneControls
+          :is-mic-active="isMicActive"
+          :can-use-mic="canUseMic"
+          @start-microphone="startMicrophone"
+          @stop-microphone="stopMicrophone"
+        />
+        
+        <FileUploadControls
+          :audio-file="audioFile"
+          :is-playing="isPlaying"
+          :duration="duration"
+          :current-time="currentTime"
+          :error="error"
+          @file-upload="handleFileUpload"
+          @play="handlePlay"
+          @pause="handlePause"
+          @stop="handleStop"
+          @seek="handleSeek"
+        />
+      </div>
+    </CollapsibleSection>
   </div>
 </template>
 
 <style scoped>
-.controls {
-  margin-bottom: 2rem;
+.controls-container {
+  width: 100%;
+  max-width: 600px;
+}
+
+.controls-content {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
 }
 </style>

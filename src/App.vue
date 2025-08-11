@@ -1,60 +1,125 @@
 <script setup lang="ts">
+import { ref, onMounted, onUnmounted } from 'vue'
 import ControlsContainer from './components/controls/ControlsContainer.vue'
 import StatusDisplay from './components/ui/StatusDisplay.vue'
-import VisualizerContainer from './components/visualizer/VisualizerContainer.vue'
-import { onMounted } from 'vue'
-import { useAudioManager } from './composables/useAudioManager'
-import { useVisualizationParams } from './composables/useVisualizationParams'
-import { useWebGLSupport } from './composables/useWebGLSupport'
+import SimpleVisualizer from './components/visualizer/SimpleVisualizer.vue'
+import DebugPanel from './components/ui/DebugPanel.vue'
+import { useSimpleAudioManager } from './composables/useSimpleAudioManager'
 
-// Use composables
+// Use simple audio manager
 const {
-  currentAnalyser,
-  currentSource,
-  audioDevices,
-  selectedDeviceId,
+  // State
+  isInitialized,
   isMicActive,
+  isPlaying,
+  currentSource,
   audioFile,
-  audioElement,
+  error,
+  duration,
+  currentTime,
+  
+  // Computed
+  hasAudio,
+  canUseMic,
+  
+  // Methods
+  initialize,
   startMicrophone,
+  stopMicrophone,
   handleFileUpload,
-  handleDeviceChange,
-  handleAudioError
-} = useAudioManager()
+  startPlayback,
+  pausePlayback,
+  stopPlayback,
+  getAudioData,
+  cleanup,
+  handlePlay,
+  handlePause,
+  handleStop,
+  handleSeek
+} = useSimpleAudioManager()
 
-const {
-  sensitivity,
-  decay,
-  frequencyMapping,
-  handleSensitivityChange,
-  handleDecayChange,
-  testReactivity
-} = useVisualizationParams()
+// Audio data for visualization
+const audioData = ref<Float32Array>(new Float32Array())
+const rmsData = ref<Float32Array>(new Float32Array())
 
-const {
-  webglSupported,
-  webglError,
-  resetVisualizer,
-  handleWebGLError,
-  checkWebGLSupport
-} = useWebGLSupport()
+// Animation loop to get audio data
+let animationId: number
+let lastAppLogTime: number | null = null
+const updateAudioData = () => {
+  const newData = getAudioData()
+  if (newData.fft && newData.fft.length > 0) {
+    audioData.value = newData.fft
+    rmsData.value = newData.rms
+    
+    // Throttle logging to once per second
+    const now = Date.now()
+    if (!lastAppLogTime || now - lastAppLogTime > 1000) {
+      console.log('App: Updated audio data, FFT length:', newData.fft.length, 'RMS length:', newData.rms.length)
+      lastAppLogTime = now
+    }
+  }
+  animationId = requestAnimationFrame(updateAudioData)
+}
 
-// Check WebGL support on mount
-onMounted(() => {
-  checkWebGLSupport()
+// Event handlers
+const onStartMicrophone = async () => {
+  await startMicrophone()
+}
+
+const onStopMicrophone = async () => {
+  await stopMicrophone()
+}
+
+const onFileUpload = async (file: File | null) => {
+  await handleFileUpload(file)
+}
+
+const onStopAudio = async () => {
+  await stopPlayback()
+}
+
+// Add debugging for play events
+const onPlay = async () => {
+  console.log('🎵 App.vue: Play event received!')
+  await handlePlay()
+}
+
+const onPause = async () => {
+  console.log('⏸️ App.vue: Pause event received!')
+  await handlePause()
+}
+
+const onStop = async () => {
+  console.log('⏹️ App.vue: Stop event received!')
+  await handleStop()
+}
+
+const onSeek = async (time: number) => {
+  console.log('🔍 App.vue: Seek event received!', time)
+  await handleSeek(time)
+}
+
+onMounted(async () => {
+  // Initialize audio system
+  await initialize()
+  
+  // Start audio data update loop
+  updateAudioData()
 })
 
-// Handle frequency mapping changes
-const handleFrequencyMappingChange = (value: 'logarithmic' | 'linear') => {
-  frequencyMapping.value = value
-}
+onUnmounted(() => {
+  if (animationId) {
+    cancelAnimationFrame(animationId)
+  }
+  cleanup()
+})
 </script>
 
 <template>
   <div class="app">
     <header class="app-header">
       <h1>Reveri</h1>
-      <p>Radial visualization with microphone or audio file input</p>
+      <p>Audio Visualizer</p>
     </header>
 
     <main class="app-main">
@@ -63,44 +128,45 @@ const handleFrequencyMappingChange = (value: 'logarithmic' | 'linear') => {
         <div class="left-column">
           <!-- Controls Section -->
           <ControlsContainer
-            :audio-devices="audioDevices"
-            :selected-device-id="selectedDeviceId"
             :is-mic-active="isMicActive"
+            :can-use-mic="canUseMic"
             :audio-file="audioFile"
-            :current-analyser="currentAnalyser"
-            :audio-element="audioElement"
-            :sensitivity="sensitivity"
-            :decay="decay"
-            :frequency-mapping="frequencyMapping"
-            @device-change="handleDeviceChange"
+            :is-playing="isPlaying"
+            :duration="duration"
+            :current-time="currentTime"
+            :error="error"
             @start-microphone="startMicrophone"
+            @stop-microphone="stopMicrophone"
             @file-upload="handleFileUpload"
-            @audio-error="handleAudioError"
-            @audio-element-ready="(element) => audioElement = element"
-            @sensitivity-change="handleSensitivityChange"
-            @decay-change="handleDecayChange"
-            @frequency-mapping-change="handleFrequencyMappingChange"
-            @reset-peaks="resetVisualizer"
-            @test-reactivity="testReactivity"
+            @play="onPlay"
+            @pause="onPause"
+            @stop="onStop"
+            @seek="onSeek"
           />
 
           <!-- Status Display -->
           <StatusDisplay
             :current-source="currentSource"
-            :webgl-supported="webglSupported"
-            :webgl-error="webglError"
+            :is-initialized="isInitialized"
+            :error="error"
+          />
+
+          <!-- Debug Panel -->
+          <DebugPanel
+            :audio-file="audioFile"
+            :current-source="currentSource"
+            :is-playing="isPlaying"
+            :is-mic-active="isMicActive"
+            :error="error"
           />
         </div>
 
         <!-- Right Column: Visualizer -->
         <div class="right-column">
-          <VisualizerContainer
-            :analyser="currentAnalyser"
-            :sensitivity="sensitivity"
-            :decay="decay"
-            :frequency-mapping="frequencyMapping"
-            :webgl-supported="webglSupported"
-            @webgl-error="handleWebGLError"
+          <SimpleVisualizer
+            :audio-data="audioData"
+            :rms-data="rmsData"
+            :is-playing="isPlaying"
           />
         </div>
       </div>

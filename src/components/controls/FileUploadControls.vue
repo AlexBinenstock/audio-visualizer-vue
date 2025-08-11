@@ -1,142 +1,145 @@
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { computed } from 'vue'
+import AudioPlayer from './AudioPlayer.vue'
 
 interface Props {
   audioFile: File | null
-  currentAnalyser: AnalyserNode | null
-  audioElement: HTMLAudioElement | undefined
+  isPlaying: boolean
+  duration: number
+  currentTime: number
+  error: string | null
 }
 
 interface Emits {
-  (e: 'file-upload', event: Event): void
-  (e: 'audio-error', event: Event): void
-  (e: 'audio-element-ready', element: HTMLAudioElement): void
+  (e: 'file-upload', file: File | null): void
+  (e: 'play'): void
+  (e: 'pause'): void
+  (e: 'stop'): void
+  (e: 'seek', time: number): void
 }
 
-defineProps<Props>()
+const props = defineProps<Props>()
 const emit = defineEmits<Emits>()
 
-const audioElementRef = ref<HTMLAudioElement>()
-
-// Watch for audio element changes and emit to parent
-watch(audioElementRef, (element) => {
-  if (element) {
-    emit('audio-element-ready', element)
-  }
-})
-
-const handleFileUpload = (event: Event) => {
-  emit('file-upload', event)
+const handleFileChange = (event: Event) => {
+  const target = event.target as HTMLInputElement
+  const file = target.files?.[0] || null
+  emit('file-upload', file)
 }
 
-const handleAudioError = (event: Event) => {
-  emit('audio-error', event)
+const clearFile = () => {
+  emit('file-upload', null)
+}
+
+const handlePlay = () => {
+  console.log('🎵 FileUploadControls.vue: Play event received!')
+  emit('play')
+}
+
+const handlePause = () => {
+  console.log('⏸️ FileUploadControls.vue: Pause event received!')
+  emit('pause')
+}
+
+const handleStop = () => {
+  emit('stop')
+}
+
+const handleSeek = (time: number) => {
+  emit('seek', time)
 }
 </script>
 
 <template>
-  <div class="control-group">
-    <h3>Audio File Input</h3>
-    <div class="file-upload">
-      <input 
-        type="file" 
-        @change="handleFileUpload" 
+  <div class="file-upload-controls">
+    <div class="file-input-section">
+      <label for="audio-file" class="file-input-label">
+        <span class="upload-icon">📁</span>
+        Choose Audio File
+      </label>
+      <input
+        id="audio-file"
+        type="file"
         accept="audio/*"
+        @change="handleFileChange"
         class="file-input"
       />
-      <div v-if="audioFile" class="file-info">
-        <p class="file-name">{{ audioFile.name }}</p>
-        <p class="file-type">{{ audioFile.type || 'Unknown type' }}</p>
-      </div>
-      <audio 
-        ref="audioElementRef"
-        v-if="audioFile" 
-        controls 
-        preload="metadata"
-        class="audio-player"
-        @error="handleAudioError"
+      
+      <button 
+        @click="clearFile" 
+        v-if="audioFile"
+        class="clear-button"
       >
-        Your browser does not support the audio element.
-      </audio>
-      <div v-if="audioFile && !currentAnalyser" class="loading-status">
-        <p>Loading audio file...</p>
-      </div>
+        Clear
+      </button>
     </div>
+    
+    <AudioPlayer
+      v-if="audioFile"
+      :audio-file="audioFile"
+      :is-playing="isPlaying"
+      :duration="duration"
+      :current-time="currentTime"
+      :error="error"
+      @play="handlePlay"
+      @pause="handlePause"
+      @stop="handleStop"
+      @seek="handleSeek"
+    />
   </div>
 </template>
 
 <style scoped>
-.control-group {
-  margin-bottom: 2rem;
-  padding: 1.5rem;
-  background: rgba(255, 255, 255, 0.05);
-  border-radius: 12px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-}
-
-.control-group h3 {
-  margin: 0 0 1rem 0;
-  color: #64ffda;
-  font-size: 1.2rem;
-  font-weight: 600;
-}
-
-.file-upload {
+.file-upload-controls {
   display: flex;
   flex-direction: column;
-  gap: 1rem;
+  gap: 16px;
+}
+
+.file-input-section {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.file-input-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 16px;
+  background: #4a4a4a;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s;
+  color: #fff;
+  font-weight: 500;
+}
+
+.file-input-label:hover {
+  background: #5a5a5a;
+  transform: translateY(-1px);
+}
+
+.upload-icon {
+  font-size: 18px;
 }
 
 .file-input {
-  padding: 0.75rem;
-  background: rgba(255, 255, 255, 0.1);
-  border: 2px dashed rgba(255, 255, 255, 0.3);
-  border-radius: 8px;
+  display: none;
+}
+
+.clear-button {
+  padding: 8px 16px;
+  background: #f44336;
+  border: none;
+  border-radius: 4px;
   color: white;
-  font-size: 1rem;
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition: all 0.2s;
 }
 
-.file-input:hover {
-  border-color: #64ffda;
-  background: rgba(100, 255, 218, 0.1);
-}
-
-.file-input:focus {
-  outline: none;
-  border-color: #64ffda;
-  box-shadow: 0 0 0 2px rgba(100, 255, 218, 0.2);
-}
-
-.file-info {
-  padding: 1rem;
-  background: rgba(255, 255, 255, 0.05);
-  border-radius: 8px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-}
-
-.file-name {
-  margin: 0 0 0.5rem 0;
-  font-weight: 600;
-  color: #64ffda;
-}
-
-.file-type {
-  margin: 0;
-  font-size: 0.9rem;
-  color: #ccc;
-}
-
-.audio-player {
-  width: 100%;
-  border-radius: 8px;
-}
-
-.loading-status {
-  text-align: center;
-  padding: 1rem;
-  color: #64ffda;
-  font-style: italic;
+.clear-button:hover {
+  background: #d32f2f;
+  transform: translateY(-1px);
 }
 </style>

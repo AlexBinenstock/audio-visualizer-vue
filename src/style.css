@@ -11,6 +11,33 @@
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+
+  /* Control component styling variables */
+  --control-bg: #2a2a2a;
+  --control-item-bg: #3a3a3a;
+  --control-item-hover: #4a4a4a;
+  --control-item-active: #2d4a2d;
+  --control-item-active-advanced: #4a3d2d;
+  --control-item-active-experimental: #4a2d2d;
+  
+  /* Text colors */
+  --text-primary: #ffffff;
+  --text-secondary: #cccccc;
+  --text-muted: #888888;
+  
+  /* Accent colors */
+  --accent-color: #64b5f6;
+  --accent-bg: #3a3a3a;
+  
+  /* Status colors */
+  --success-color: #4caf50;
+  --warning-color: #ff9800;
+  --danger-color: #f44336;
+  --danger-bg: #d32f2f;
+  --danger-hover: #b71c1c;
+  
+  /* Border colors */
+  --border-color: #444444;
 }
 
 a {

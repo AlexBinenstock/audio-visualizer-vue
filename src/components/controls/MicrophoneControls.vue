@@ -1,97 +1,71 @@
 <script setup lang="ts">
-import type { AudioInputDevice } from '../../lib/audio'
-
 interface Props {
-  audioDevices: AudioInputDevice[]
-  selectedDeviceId: string
   isMicActive: boolean
+  canUseMic: boolean
 }
 
 interface Emits {
-  (e: 'device-change', deviceId: string): void
   (e: 'start-microphone'): void
+  (e: 'stop-microphone'): void
 }
 
 defineProps<Props>()
 const emit = defineEmits<Emits>()
 
-const handleDeviceChange = (event: Event) => {
-  const target = event.target as HTMLSelectElement
-  // Update the selected device ID in the parent
-  emit('device-change', target.value)
-}
-
 const handleStartMicrophone = () => {
   emit('start-microphone')
+}
+
+const handleStopMicrophone = () => {
+  emit('stop-microphone')
 }
 </script>
 
 <template>
-  <div class="control-group">
+  <div class="control-content">
     <h3>Microphone Input</h3>
-    <div class="device-selector">
-      <select :value="selectedDeviceId" @change="handleDeviceChange">
-        <option value="">Select microphone...</option>
-        <option 
-          v-for="device in audioDevices" 
-          :key="device.deviceId" 
-          :value="device.deviceId"
-        >
-          {{ device.label }}
-        </option>
-      </select>
+    <div class="microphone-controls">
       <button 
+        v-if="!isMicActive"
         @click="handleStartMicrophone" 
-        :disabled="isMicActive"
+        :disabled="!canUseMic"
         class="btn btn-primary"
       >
-        {{ isMicActive ? 'Microphone Active' : 'Use Microphone' }}
+        Use Microphone
       </button>
+      <button 
+        v-else
+        @click="handleStopMicrophone" 
+        class="btn btn-secondary"
+      >
+        Stop Microphone
+      </button>
+      <div v-if="!canUseMic && !isMicActive" class="mic-disabled">
+        <small>Microphone disabled while audio is playing</small>
+      </div>
     </div>
   </div>
 </template>
 
 <style scoped>
-.control-group {
-  margin-bottom: 2rem;
+.control-content {
   padding: 1.5rem;
-  background: rgba(255, 255, 255, 0.05);
-  border-radius: 12px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
 }
 
-.control-group h3 {
+.control-content h3 {
   margin: 0 0 1rem 0;
-  color: #64ffda;
+  color: var(--accent-color);
   font-size: 1.2rem;
   font-weight: 600;
 }
 
-.device-selector {
+.microphone-controls {
   display: flex;
+  flex-direction: column;
   gap: 1rem;
-  align-items: center;
-  flex-wrap: wrap;
 }
 
-.device-selector select {
-  flex: 1;
-  min-width: 200px;
-  padding: 0.75rem;
-  background: rgba(255, 255, 255, 0.1);
-  border: 1px solid rgba(255, 255, 255, 0.2);
-  border-radius: 8px;
-  color: white;
-  font-size: 1rem;
-}
-
-.device-selector select:focus {
-  outline: none;
-  border-color: #64ffda;
-  box-shadow: 0 0 0 2px rgba(100, 255, 218, 0.2);
-}
-
-.btn {
+.microphone-controls .btn {
   padding: 0.75rem 1.5rem;
   border: none;
   border-radius: 8px;
@@ -102,19 +76,32 @@ const handleStartMicrophone = () => {
 }
 
 .btn-primary {
-  background: #64ffda;
+  background: linear-gradient(135deg, #64ffda 0%, #00bcd4 100%);
   color: #0f0f23;
 }
 
 .btn-primary:hover:not(:disabled) {
-  background: #00bcd4;
   transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(100, 255, 218, 0.3);
 }
 
 .btn-primary:disabled {
-  background: #666;
-  color: #999;
+  opacity: 0.5;
   cursor: not-allowed;
-  transform: none;
+}
+
+.btn-secondary {
+  background: linear-gradient(135deg, #ff6b6b 0%, #ee5a24 100%);
+  color: white;
+}
+
+.btn-secondary:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(255, 107, 107, 0.3);
+}
+
+.mic-disabled {
+  color: #888;
+  font-style: italic;
 }
 </style>

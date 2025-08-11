@@ -1,22 +1,23 @@
 # Reveri - Vue 3 + TypeScript + Vite
 
-A real-time audio visualizer built with Vue 3, TypeScript, and Canvas2D. Features radial visualization with microphone input or audio file upload, smooth animations, and customizable parameters.
+A real-time audio visualizer built with Vue 3, TypeScript, and WebGL2. Features advanced radial visualization with enhanced audio analysis powered by Tone.js, supporting microphone input or audio file upload.
 
 ## Features
 
 - 🎤 **Microphone Input**: Real-time audio analysis from any connected microphone
 - 📁 **Audio File Support**: Upload and visualize audio files (MP3, WAV, etc.)
-- 🎨 **Radial Visualization**: Smooth, responsive canvas-based visualization
-- ⚙️ **Customizable Parameters**: Adjust sensitivity and decay for different audio styles
+- 🎨 **WebGL2 Visualization**: High-performance GPU-accelerated radial visualization
+- 🎵 **Enhanced Audio Analysis**: Advanced FFT analysis with Tone.js for better frequency resolution
+- ⚙️ **Customizable Parameters**: Adjust sensitivity, decay, and smoothing for different audio styles
 - 📱 **Responsive Design**: Works on desktop and mobile devices
-- 🚀 **Performance Optimized**: Efficient Canvas2D rendering with 60fps animations
+- 🚀 **Performance Optimized**: Efficient WebGL2 rendering with 60fps animations
 
 ## Getting Started
 
 ### Prerequisites
 
 - Node.js 16+ 
-- Modern browser with Web Audio API support
+- Modern browser with WebGL2 and Web Audio API support
 
 ### Installation
 
@@ -63,16 +64,24 @@ To capture system audio (music from Spotify, YouTube, etc.) on Windows:
 ```
 src/
 ├── lib/
-│   └── audio.ts          # Audio analysis utilities
+│   ├── audio.ts              # Audio input utilities
+│   ├── types.ts              # Core type definitions
+│   ├── tone-audio-processor.ts # Tone.js audio processing
+│   └── webgl/                # WebGL2 rendering system
 ├── components/
-│   └── VisualizerRadial.vue  # Radial visualization component
-└── App.vue               # Main application interface
+│   ├── visualizer/
+│   │   └── VisualizerRadialWebGL.vue  # WebGL2 visualization
+│   └── controls/             # Audio and visualization controls
+├── composables/
+│   └── useToneAudioManager.ts # Enhanced audio management
+└── App.vue                   # Main application interface
 ```
 
 ### Key Technologies
 - **Vue 3 Composition API** with `<script setup lang="ts">`
-- **Web Audio API** for real-time audio analysis
-- **Canvas2D** for performant rendering
+- **Tone.js** for advanced audio analysis and processing
+- **WebGL2** for high-performance GPU rendering
+- **Web Audio API** for real-time audio input
 - **TypeScript** for type safety
 
 ### Building for Production
@@ -83,11 +92,11 @@ npm run preview
 
 ## Future Enhancements
 
-- WebGL2 shader-based rendering for advanced effects
+- Advanced audio effects and filters
 - Multiple visualization modes (spectrum, waveform, 3D)
-- Audio effects and filters
 - Recording and export capabilities
 - Particle systems and smoke effects
+- Real-time audio manipulation
 
 ## Browser Support
 
