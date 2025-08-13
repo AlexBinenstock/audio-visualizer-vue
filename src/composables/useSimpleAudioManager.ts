@@ -61,7 +61,7 @@ export function useSimpleAudioManager() {
       // Connect analysers to destination for monitoring (optional)
       analyser.toDestination()
       enhancedAnalyser.toDestination()
-      meter.toDestination()
+      // Don't connect meter to destination - it should only receive input for RMS calculation
       
       isInitialized.value = true
       error.value = null
@@ -85,6 +85,7 @@ export function useSimpleAudioManager() {
       // Connect mic to both analysers and destination
       mic.connect(analyser)
       mic.connect(enhancedAnalyser)
+      mic.connect(meter)
       mic.toDestination()
       
       error.value = null
@@ -146,6 +147,7 @@ export function useSimpleAudioManager() {
         // Ensure player is connected to analyser and destination
         player.connect(analyser)
         player.connect(enhancedAnalyser)
+        player.connect(meter)
         console.log('Player connected to analysers')
         // Also connect player directly to destination to ensure audio output
         player.toDestination()
@@ -347,20 +349,16 @@ export function useSimpleAudioManager() {
     
     // Convert FFT data to Float32Array
     if (Array.isArray(fftData)) {
-      fftArray = new Float32Array(fftData)
+      const first = (fftData as any[])[0]
+      fftArray = first instanceof Float32Array ? first : new Float32Array(first as ArrayLike<number>)
     } else {
       // If it's already a Float32Array or single number, handle accordingly
       fftArray = fftData as Float32Array
     }
     
     // Convert RMS data to Float32Array - Tone.Meter returns a single number
-    if (typeof rmsValue === 'number') {
-      rmsArray = new Float32Array([rmsValue])
-    } else if (Array.isArray(rmsValue)) {
-      rmsArray = new Float32Array(rmsValue)
-    } else {
-      rmsArray = new Float32Array([rmsValue as number])
-    }
+    const rmsNum = typeof rmsValue === 'number' ? rmsValue : Array.isArray(rmsValue) ? Number(rmsValue[0]) : Number(rmsValue)
+    rmsArray = new Float32Array([isFinite(rmsNum) ? rmsNum : 0])
     
     // Throttle logging to once per second
     const now = Date.now()

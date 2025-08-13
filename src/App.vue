@@ -2,8 +2,11 @@
 import { ref, onMounted, onUnmounted } from 'vue'
 import ControlsContainer from './components/controls/ControlsContainer.vue'
 import StatusDisplay from './components/ui/StatusDisplay.vue'
-import SimpleVisualizer from './components/visualizer/SimpleVisualizer.vue'
-import DebugPanel from './components/ui/DebugPanel.vue'
+import VisualizerSelector from './components/ui/VisualizerSelector.vue'
+import LayerHost3D from './components/visualizer/LayerHost3D.vue'
+import LayerControls from './components/controls/LayerControls.vue'
+import * as Tone from 'tone'
+
 import { useSimpleAudioManager } from './composables/useSimpleAudioManager'
 
 // Use simple audio manager
@@ -19,7 +22,6 @@ const {
   currentTime,
   
   // Computed
-  hasAudio,
   canUseMic,
   
   // Methods
@@ -27,9 +29,7 @@ const {
   startMicrophone,
   stopMicrophone,
   handleFileUpload,
-  startPlayback,
-  pausePlayback,
-  stopPlayback,
+  // unused: startPlayback, pausePlayback, stopPlayback
   getAudioData,
   cleanup,
   handlePlay,
@@ -41,6 +41,17 @@ const {
 // Audio data for visualization
 const audioData = ref<Float32Array>(new Float32Array())
 const rmsData = ref<Float32Array>(new Float32Array())
+
+// Visualizer selection
+const selectedVisualizer = ref<string[]>(['simple'])
+
+const activeLayerIds = () => {
+  return selectedVisualizer.value.map(id => {
+    if (id === 'simple') return 'radial-basic-3d'
+    if (id === 'circle') return 'cannon-fireworks-3d'
+    return id
+  }).filter((v, i, a) => a.indexOf(v) === i)
+}
 
 // Animation loop to get audio data
 let animationId: number
@@ -62,21 +73,7 @@ const updateAudioData = () => {
 }
 
 // Event handlers
-const onStartMicrophone = async () => {
-  await startMicrophone()
-}
-
-const onStopMicrophone = async () => {
-  await stopMicrophone()
-}
-
-const onFileUpload = async (file: File | null) => {
-  await handleFileUpload(file)
-}
-
-const onStopAudio = async () => {
-  await stopPlayback()
-}
+// (handlers are wired directly to audio manager methods below)
 
 // Add debugging for play events
 const onPlay = async () => {
@@ -151,22 +148,22 @@ onUnmounted(() => {
             :error="error"
           />
 
-          <!-- Debug Panel -->
-          <DebugPanel
-            :audio-file="audioFile"
-            :current-source="currentSource"
-            :is-playing="isPlaying"
-            :is-mic-active="isMicActive"
-            :error="error"
+          <!-- Visualizer Selector -->
+          <VisualizerSelector
+            v-model="selectedVisualizer"
           />
+
+          <LayerControls :layer-ids="activeLayerIds()" />
+
         </div>
 
         <!-- Right Column: Visualizer -->
         <div class="right-column">
-          <SimpleVisualizer
-            :audio-data="audioData"
-            :rms-data="rmsData"
-            :is-playing="isPlaying"
+          <LayerHost3D
+            :fft="audioData"
+            :rms="rmsData[0] || 0"
+            :sample-rate="Tone.context.sampleRate"
+            :active-layer-ids="activeLayerIds()"
           />
         </div>
       </div>
