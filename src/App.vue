@@ -6,6 +6,7 @@ import VisualizerSelector from './components/ui/VisualizerSelector.vue'
 import LayerHost3D from './components/visualizer/LayerHost3D.vue'
 import LayerControls from './components/controls/LayerControls.vue'
 import * as Tone from 'tone'
+import { registry } from './engine/layers'
 
 import { useSimpleAudioManager } from './composables/useSimpleAudioManager'
 
@@ -43,14 +44,23 @@ const audioData = ref<Float32Array>(new Float32Array())
 const rmsData = ref<Float32Array>(new Float32Array())
 
 // Visualizer selection
-const selectedVisualizer = ref<string[]>(['simple'])
+const selectedVisualizer = ref<string[]>(['debug'])
+
+// Track source changes to reset feature extractor state downstream
+const sourceVersion = ref(0)
 
 const activeLayerIds = () => {
-  return selectedVisualizer.value.map(id => {
-    if (id === 'simple') return 'radial-basic-3d'
-    if (id === 'circle') return 'cannon-fireworks-3d'
-    return id
-  }).filter((v, i, a) => a.indexOf(v) === i)
+  const resolve = (name: string) => {
+    if (name === 'simple') return 'radial-basic-3d'
+    if (name === 'debug') return 'audio-debug-bars-3d'
+    if (name === 'circle') return 'cannon-fireworks-3d'
+    if (name === 'synthwave' || name === 'synth') {
+      const found = registry.all().find(l => l.id.toLowerCase().includes('synth'))
+      return found ? found.id : name
+    }
+    return name
+  }
+  return selectedVisualizer.value.map(resolve).filter((v, i, a) => a.indexOf(v) === i)
 }
 
 // Animation loop to get audio data
@@ -110,6 +120,19 @@ onUnmounted(() => {
   }
   cleanup()
 })
+
+// Bump sourceVersion whenever currentSource changes
+// Simple watch implemented via existing handlers that set currentSource
+// Mic start
+const startMicrophoneWithBump = async () => {
+  await startMicrophone()
+  sourceVersion.value++
+}
+// File upload
+const handleFileUploadWithBump = async (file: File | null) => {
+  await handleFileUpload(file)
+  sourceVersion.value++
+}
 </script>
 
 <template>
@@ -132,9 +155,9 @@ onUnmounted(() => {
             :duration="duration"
             :current-time="currentTime"
             :error="error"
-            @start-microphone="startMicrophone"
+            @start-microphone="startMicrophoneWithBump"
             @stop-microphone="stopMicrophone"
-            @file-upload="handleFileUpload"
+            @file-upload="handleFileUploadWithBump"
             @play="onPlay"
             @pause="onPause"
             @stop="onStop"
@@ -161,9 +184,10 @@ onUnmounted(() => {
         <div class="right-column">
           <LayerHost3D
             :fft="audioData"
-            :rms="rmsData[0] || 0"
+            :rms="(rmsData[0] ?? -Infinity) as number"
             :sample-rate="Tone.context.sampleRate"
             :active-layer-ids="activeLayerIds()"
+            :source-version="sourceVersion"
           />
         </div>
       </div>

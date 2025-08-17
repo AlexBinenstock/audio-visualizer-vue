@@ -26,6 +26,8 @@ export function useSimpleAudioManager() {
   
   // Enhanced analyser for better frequency resolution
   let enhancedAnalyser: Tone.Analyser
+  // Track current file URL to revoke later
+  let fileUrl: string | null = null
   
   // Computed
   const hasAudio = computed(() => currentSource.value !== null)
@@ -46,7 +48,7 @@ export function useSimpleAudioManager() {
       enhancedAnalyser = new Tone.Analyser({
         type: 'fft',
         size: 512, // Higher resolution for better frequency analysis
-        smoothing: 0.3 // Built-in smoothing
+        smoothing: 0.08 // Lower smoothing; we handle smoothing in features.ts
       })
       
       // Create meter for RMS values
@@ -58,10 +60,8 @@ export function useSimpleAudioManager() {
       // Create player for file playback
       player = new Tone.Player()
       
-      // Connect analysers to destination for monitoring (optional)
-      analyser.toDestination()
-      enhancedAnalyser.toDestination()
-      // Don't connect meter to destination - it should only receive input for RMS calculation
+      // Do not route analysers to destination; avoid parallel audio paths
+      // Only sources (mic/player) should go to destination
       
       isInitialized.value = true
       error.value = null
@@ -130,7 +130,10 @@ export function useSimpleAudioManager() {
         audioFile.value = file
         
         // Load and play the file
+        // Revoke previously loaded URL if any
+        if (fileUrl) { URL.revokeObjectURL(fileUrl); fileUrl = null }
         const url = URL.createObjectURL(file)
+        fileUrl = url
         console.log('Created object URL:', url)
         
         await player.load(url)
@@ -183,6 +186,7 @@ export function useSimpleAudioManager() {
         if (player) {
           player.stop()
         }
+        if (fileUrl) { URL.revokeObjectURL(fileUrl); fileUrl = null }
       }
       
       error.value = null
@@ -408,10 +412,8 @@ export function useSimpleAudioManager() {
     if (isPlaying.value) {
       stopPlayback()
     }
-    if (audioFile.value) {
-      URL.revokeObjectURL(URL.createObjectURL(audioFile.value))
-      audioFile.value = null
-    }
+    if (fileUrl) { URL.revokeObjectURL(fileUrl); fileUrl = null }
+    audioFile.value = null
     currentSource.value = null
     
     // Clear time update timer

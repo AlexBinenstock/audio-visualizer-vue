@@ -2,19 +2,10 @@
   <div class="visualizer-selector">
     <h4>Visualizer Layers</h4>
     <div class="selector-options">
-      <label
-        v-for="option in visualizerOptions"
-        :key="option.value"
-        class="selector-option"
-        :class="{ 'active': modelValue.includes(option.value) }"
-      >
-        <input
-          type="checkbox"
-          :value="option.value"
-          :checked="modelValue.includes(option.value)"
-          @change="toggleLayer(option.value)"
-          class="layer-checkbox"
-        />
+      <label v-for="option in visualizerOptions" :key="option.value" class="selector-option"
+        :class="{ 'active': modelValue.includes(option.value) }">
+        <input type="checkbox" :value="option.value" :checked="modelValue.includes(option.value)"
+          @change="toggleLayer(option.value)" class="layer-checkbox" />
         <span class="option-icon">{{ option.icon }}</span>
         <span class="option-label">{{ option.label }}</span>
       </label>
@@ -48,6 +39,16 @@ const emit = defineEmits<Emits>()
 
 const visualizerOptions: VisualizerOption[] = [
   {
+    value: 'synthwave',
+    label: 'Synthwave',
+    icon: '🌆'
+  },
+  {
+    value: 'debug',
+    label: 'Debug Bars',
+    icon: '📊'
+  },
+  {
     value: 'simple',
     label: 'Simple',
     icon: '⭕'
@@ -56,13 +57,18 @@ const visualizerOptions: VisualizerOption[] = [
     value: 'circle',
     label: 'Cannon Fireworks',
     icon: '🎆'
+  },
+  {
+    value: 'synth',
+    label: 'Synthwave World',
+    icon: '🌆'
   }
 ]
 
 const toggleLayer = (value: string) => {
   const newLayers = [...props.modelValue]
   const index = newLayers.indexOf(value)
-  
+
   if (index > -1) {
     // Remove layer
     newLayers.splice(index, 1)
@@ -70,12 +76,12 @@ const toggleLayer = (value: string) => {
     // Add layer
     newLayers.push(value)
   }
-  
+
   // Ensure at least one layer is selected
   if (newLayers.length === 0) {
-    newLayers.push('simple')
+    newLayers.push('debug')
   }
-  
+
   emit('update:modelValue', newLayers)
 }
 </script>

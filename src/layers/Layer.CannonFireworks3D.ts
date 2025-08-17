@@ -14,7 +14,7 @@ type Attrs = {
 class CannonFireworks3D implements Layer {
   id = 'cannon-fireworks-3d'
   label = 'Cannon Fireworks'
-  controls = [
+  controls: import('../engine/layers').Control[] = [
     { kind: 'slider', key: 'cannonCount', label: 'Cannons', min: 6, max: 24, step: 1, default: 12 },
     { kind: 'slider', key: 'radius', label: 'Radius', min: 1.5, max: 5.0, step: 0.1, default: 3.2 },
     { kind: 'slider', key: 'tiltDeg', label: 'Tilt', min: 5, max: 30, step: 1, default: 18 },
@@ -23,9 +23,9 @@ class CannonFireworks3D implements Layer {
     { kind: 'slider', key: 'spread', label: 'Spread', min: 0.05, max: 0.4, step: 0.01, default: 0.18 },
     { kind: 'slider', key: 'gravity', label: 'Gravity', min: 0.5, max: 6.0, step: 0.1, default: 3.5 },
     { kind: 'slider', key: 'particleLifeMs', label: 'Life (ms)', min: 400, max: 2200, step: 10, default: 1200 },
-    { kind: 'slider', key: 'particleSizePx', label: 'Size (px)', min: 2, max: 12, step: 1, default: 7 },
+    { kind: 'slider', key: 'particleSizePx', label: 'Size (px)', min: 2, max: 12, step: 1, default: 5 },
     { kind: 'slider', key: 'maxParticles', label: 'Max Particles', min: 2000, max: 20000, step: 100, default: 16000 },
-  ] as const
+  ]
   state: Record<string, any> = {}
 
   private points: THREE.Points | null = null
@@ -37,6 +37,8 @@ class CannonFireworks3D implements Layer {
   private hue!: Float32Array
   private size!: Float32Array
   private writeIndex = 0
+  private emitCarry = 0
+  private lastCannonIndex = 0
 
   private lastT = performance.now()
 
@@ -91,7 +93,8 @@ class CannonFireworks3D implements Layer {
           v_life = 1.0 - t;
           v_hue = a_hue;
           vec3 pos = a_pos0 + a_vel0 * (t * a_life * 0.001);
-          pos.y += -0.5 * u_gravity * (t * a_life * 0.001) * (t * a_life * 0.001);
+          // gravity acts along -Z to match XY-oriented ring
+          pos.z += -0.5 * u_gravity * (t * a_life * 0.001) * (t * a_life * 0.001);
           vec4 mvPosition = modelViewMatrix * vec4(pos, 1.0);
           gl_PointSize = a_size * (300.0 / -mvPosition.z);
           gl_Position = projectionMatrix * mvPosition;
@@ -129,7 +132,7 @@ class CannonFireworks3D implements Layer {
     this.attrs = { a_birth, a_life, a_pos0, a_vel0, a_hue, a_size }
   }
 
-  update(ctx: LayerContext, f: Features): void {
+  update(_ctx: LayerContext, f: Features): void {
     if (!this.points || !this.attrs) return
     const now = performance.now()
     const dt = Math.max(1, now - this.lastT)
@@ -147,42 +150,72 @@ class CannonFireworks3D implements Layer {
     ;(this.points.material as THREE.ShaderMaterial).uniforms.u_time.value = now
     ;(this.points.material as THREE.ShaderMaterial).uniforms.u_gravity.value = gravity
 
-    const rate = (this.state.baseRate as number) + f.bands.low * (this.state.bassRateGain as number)
-    const emitPerCannon = rate * (dt / 1000)
-
-    for (let c = 0; c < cannons; c++) {
-      const baseAngle = (c / cannons) * Math.PI * 2
-      const dirX = Math.cos(baseAngle) * Math.cos(tilt)
-      const dirY = Math.sin(tilt)
-      const dirZ = Math.sin(baseAngle) * Math.cos(tilt)
-      let toEmit = emitPerCannon
-      while (toEmit > 0) {
-        const emitThis = Math.min(1, toEmit)
-        toEmit -= emitThis
-        // Write one particle
-        const i = this.writeIndex % N
-        this.writeIndex = (this.writeIndex + 1) % N
-        const tBirth = now
-        const hue = (0.03 * c + 0.6 * f.bands.high + 0.2 * f.bands.mid) % 1
-        const speed = 1.8 + 2.2 * f.energy
-        const spreadAngle = (Math.random() - 0.5) * spread
-        const cs = Math.cos(spreadAngle)
-        const sn = Math.sin(spreadAngle)
-        const vx = dirX * speed * cs
-        const vy = dirY * speed + (Math.random() * 0.4)
-        const vz = dirZ * speed * sn
-        const px = Math.cos(baseAngle) * R
-        const py = 0
-        const pz = Math.sin(baseAngle) * R
-
-        this.birthTimes[i] = tBirth
-        this.lifeTimes[i] = lifeMs
-        const pi = i * 3
-        this.pos0[pi] = px; this.pos0[pi + 1] = py; this.pos0[pi + 2] = pz
-        this.vel0[pi] = vx; this.vel0[pi + 1] = vy; this.vel0[pi + 2] = vz
-        this.hue[i] = hue
-        this.size[i] = sizePx * (0.8 + 0.4 * f.bands.high)
+    // Compute band energies from normalized bins (fallback to processed if absent)
+    const bins = (f as any).bins ?? f.binsLog
+    const nBins = bins.length
+    let lowAvg = f.bands.low, midAvg = f.bands.mid, highAvg = f.bands.high
+    if (nBins > 0) {
+      const fMin = 20, fMax = 8000
+      const mapHzToIdx = (hz: number) => {
+        const t = (Math.log(hz) - Math.log(fMin)) / (Math.log(fMax) - Math.log(fMin))
+        const idx = Math.round(t * (nBins - 1))
+        return Math.max(0, Math.min(nBins - 1, idx))
       }
+      const avgRange = (hz0: number, hz1: number) => {
+        const i0 = mapHzToIdx(hz0)
+        const i1 = mapHzToIdx(hz1)
+        const a = Math.min(i0, i1), b = Math.max(i0, i1)
+        let s = 0, c = 0
+        for (let i = a; i <= b; i++) { s += bins[i]; c++ }
+        return c ? s / c : 0
+      }
+      lowAvg = avgRange(20, 160)
+      midAvg = avgRange(160, 2000)
+      highAvg = avgRange(2000, 8000)
+    }
+
+    // Audio-driven emission only: threshold and curve to avoid constant trickle
+    const low = Math.max(0, lowAvg - 0.04)
+    const audioDrive = Math.pow(low, 2) // emphasize stronger lows
+    const ratePerCannon = audioDrive * (this.state.bassRateGain as number) // particles/sec per cannon
+    const dtSec = dt / 1000
+
+    // Accumulate fractional emissions across frames for stability
+    const totalToEmit = cannons * ratePerCannon * dtSec + this.emitCarry
+    let numToEmit = Math.floor(totalToEmit)
+    this.emitCarry = totalToEmit - numToEmit
+
+    while (numToEmit-- > 0) {
+      const c = this.lastCannonIndex % cannons
+      this.lastCannonIndex = (this.lastCannonIndex + 1) % cannons
+      const baseAngle = (c / cannons) * Math.PI * 2
+      // Orient cannons around XY ring (z = 0), shooting slightly out of plane (+Z) by tilt
+      const dirX = Math.cos(baseAngle) * Math.cos(tilt)
+      const dirY = Math.sin(baseAngle) * Math.cos(tilt)
+      const dirZ = Math.sin(tilt)
+
+      // Write one particle
+      const i = this.writeIndex % N
+      this.writeIndex = (this.writeIndex + 1) % N
+      const tBirth = now
+      const hue = (0.03 * c + 0.6 * highAvg + 0.2 * midAvg) % 1
+      const speed = 1.8 + 2.2 * f.energy
+      const spreadAngle = (Math.random() - 0.5) * spread
+      const cs = Math.cos(spreadAngle)
+      const vx = dirX * speed * cs
+      const vy = dirY * speed * cs
+      const vz = dirZ * speed + (Math.random() * 0.3)
+      const px = Math.cos(baseAngle) * R
+      const py = Math.sin(baseAngle) * R
+      const pz = 0
+
+      this.birthTimes[i] = tBirth
+      this.lifeTimes[i] = lifeMs
+      const pi = i * 3
+      this.pos0[pi] = px; this.pos0[pi + 1] = py; this.pos0[pi + 2] = pz
+      this.vel0[pi] = vx; this.vel0[pi + 1] = vy; this.vel0[pi + 2] = vz
+      this.hue[i] = hue
+      this.size[i] = sizePx * Math.max(0.05, 0.3 * highAvg)
     }
 
     // Mark full ranges as updated (we could track slices per frame, but this stays O(1) allocations)
