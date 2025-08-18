@@ -19,6 +19,9 @@ class SynthwaveWorld3D implements Layer {
     { kind:'slider', key:'poleHeight',  label:'Pole Height',      min:0.4,max:3.0, step:0.05, default:1.2 },
     { kind:'slider', key:'poleXOffset', label:'Pole X Offset',    min:3.0,max:20,  step:0.1,  default:6.5 },
     { kind:'slider', key:'poleGlow',    label:'Pole Glow',        min:0.2,max:3.0, step:0.05, default:1.4 },
+    { kind:'slider', key:'heightGain',  label:'Height Gain',      min:0.0,max:2.0, step:0.01, default:1.0 },
+    { kind:'slider', key:'cols',        label:'Grid Columns',     min:64,  max:256, step:1,   default:128 },
+    { kind:'slider', key:'rows',        label:'Grid Rows',        min:64,  max:512, step:1,   default:256 },
 
   ]
   state: Record<string, any> = {}
@@ -36,15 +39,43 @@ class SynthwaveWorld3D implements Layer {
     uFadeDepth: { value: number }
     uHue:       { value: number }
     uEmissive:  { value: number }
+    uHeightTex: { value: THREE.DataTexture }
+    uHFSize:    { value: THREE.Vector2 }
+    uRowHead:   { value: number }
+    uHeightGain:{ value: number }
+    uRowStepW:  { value: number }
   }
 
   private scroll = 0
+  private prevScroll = 0
+  private WORLD_W = 160
+  private WORLD_D = 120
+  private hfTex!: THREE.DataTexture
+  private hfArray!: Float32Array
+  private hfW = 128
+  private hfH = 256
+  private rowHead = 0
+  private rowStepWorld = 0
 
   init(ctx: LayerContext): void {
     createStateFromControls(this)
 
     // Wide, deep plane; grid computed in world units (XZ), not UV
-    const geo = new THREE.PlaneGeometry(160, 120, 1, 1)
+    // Heightfield setup (ring-buffer texture)
+    this.hfW = Math.max(2, Math.floor(((this.state.cols as number) ?? 128)))
+    this.hfH = Math.max(2, Math.floor(((this.state.rows as number) ?? 256)))
+    this.hfArray = new Float32Array(this.hfW * this.hfH)
+    this.hfTex = new THREE.DataTexture(this.hfArray, this.hfW, this.hfH, THREE.RedFormat, THREE.FloatType)
+    this.hfTex.needsUpdate = true
+    this.hfTex.wrapS = THREE.ClampToEdgeWrapping
+    this.hfTex.wrapT = THREE.ClampToEdgeWrapping
+    this.hfTex.magFilter = THREE.LinearFilter
+    this.hfTex.minFilter = THREE.LinearFilter
+    this.rowHead = 0
+    this.prevScroll = 0
+    this.rowStepWorld = this.WORLD_D / Math.max(1, this.hfH - 1)
+
+    const geo = new THREE.PlaneGeometry(this.WORLD_W, this.WORLD_D, this.hfW - 1, this.hfH - 1)
     geo.rotateX(-Math.PI / 2)
     geo.translate(0, -0.65, -8.0)
 
@@ -55,6 +86,11 @@ class SynthwaveWorld3D implements Layer {
       uFadeDepth: { value: this.state.fadeDepth },
       uHue:       { value: this.state.hue },
       uEmissive:  { value: this.state.emissive },
+      uHeightTex: { value: this.hfTex },
+      uHFSize:    { value: new THREE.Vector2(this.hfW, this.hfH) },
+      uRowHead:   { value: this.rowHead },
+      uHeightGain:{ value: (this.state.heightGain as number) ?? 1.0 },
+      uRowStepW:  { value: this.rowStepWorld },
     }
 
     const mat = new THREE.ShaderMaterial({
@@ -66,12 +102,31 @@ class SynthwaveWorld3D implements Layer {
       // WebGL2 / GLSL3
       glslVersion: THREE.GLSL3,
       vertexShader: /* glsl */`
+        precision highp float;
+
         out vec2 vXZ;
         out float vViewZ;
+
+        uniform sampler2D uHeightTex;
+        uniform vec2  uHFSize;
+        uniform int   uRowHead;
+        uniform float uHeightGain;
+        uniform float uScroll;   // 0..1 between rows
+
         void main() {
-          vXZ = position.xz;
-          vec4 mv = modelViewMatrix * vec4(position, 1.0);
+          // attributes position and uv are provided by Three.js (GLSL3)
+          float gx = uv.x * (uHFSize.x - 1.0);
+          float gz = uv.y * (uHFSize.y - 1.0);
+
+          // row ring buffer addressing + smooth scroll
+          float row = mod(float(uRowHead) + gz + uScroll, uHFSize.y);
+          vec2 texUV = vec2((floor(gx)+0.5)/uHFSize.x, (floor(row)+0.5)/uHFSize.y);
+
+          float h = texture(uHeightTex, texUV).r * uHeightGain;
+
+          vec4 mv = modelViewMatrix * vec4(position.x, position.y + h, position.z, 1.0);
           vViewZ = -mv.z;
+          vXZ = vec2(position.x, position.z);
           gl_Position = projectionMatrix * mv;
         }
       `,
@@ -81,7 +136,7 @@ class SynthwaveWorld3D implements Layer {
         in float vViewZ;
         out vec4 outColor;
 
-        uniform float uScroll, uStep, uWidth, uFadeDepth, uHue, uEmissive;
+        uniform float uScroll, uStep, uWidth, uFadeDepth, uHue, uEmissive, uRowStepW;
 
         // Simple HSL->RGB
         vec3 hsl2rgb(vec3 c){
@@ -99,9 +154,9 @@ class SynthwaveWorld3D implements Layer {
         }
 
         void main(){
-          // world-space grid in XZ; scroll along +Z
+          // world-space grid in XZ; scroll lines forward in world-units
           vec2 uv = vXZ;
-          uv.y += uScroll;
+          uv.y += uScroll * uRowStepW;
 
           float lines = gridMask(uv, uStep, uWidth);
 
@@ -159,8 +214,8 @@ class SynthwaveWorld3D implements Layer {
 
     // keep motion when quiet; add with adaptive energy
     const speed = baseSpeed * (0.7 + 0.8 * f.energyPeak01)
-    this.scroll = (this.scroll - (dt * 0.001) * speed) % 1000
-    if (this.scroll < 0) this.scroll += 1000
+    this.scroll = (this.scroll - (dt * 0.001) * speed) % 1.0 // 0..1 between rows
+    if (this.scroll < 0) this.scroll += 1.0
 
     // push uniforms
     this.u.uScroll.value    = this.scroll
@@ -170,10 +225,29 @@ class SynthwaveWorld3D implements Layer {
     this.u.uHue.value       = hue
     this.u.uEmissive.value  = (this.state.emissive as number) ?? 1.0
 
+    // Write a new heightfield row when we cross a row boundary
+    if (this.scroll < this.prevScroll) {
+      // advance head (newest row at horizon)
+      this.rowHead = (this.rowHead - 1 + this.hfH) % this.hfH
+      const bins = f.binsLog
+      for (let x = 0; x < this.hfW; x++) {
+        const t = x / Math.max(1, this.hfW - 1)
+        const idx = t * Math.max(1, bins.length - 1)
+        const i0 = Math.floor(idx)
+        const frac = idx - i0
+        const i1 = Math.min(i0 + 1, bins.length - 1)
+        const v = (1 - frac) * bins[i0] + frac * bins[i1]
+        this.hfArray[this.rowHead * this.hfW + x] = v
+      }
+      this.hfTex.needsUpdate = true
+      this.u.uRowHead.value = this.rowHead
+      this.u.uHeightGain.value = (this.state.heightGain as number) ?? 1.0
+    }
+    this.prevScroll = this.scroll
+
     // --- Update poles (wrap on scroll) ---
     const spacing = (this.state.poleSpacing as number) ?? 6
     const xOff    = (this.state.poleXOffset as number) ?? 6.5
-    const h       = (this.state.poleHeight as number) ?? 1.2
     const glow    = (this.state.poleGlow   as number) ?? 1.4
 
     // color can follow grid hue for cohesion (constant brightness)
@@ -205,8 +279,6 @@ class SynthwaveWorld3D implements Layer {
 
       const isLeft = (i % 2) === 0
       const x = (isLeft ? -xOff : xOff)
-      const y = 0 // on ground plane at y ~= -0.65; our pole geometry already sits on y=0, scene plane is translated
-
       const pos = new THREE.Vector3(x, -0.65, z)  // match plane y translate
       tmp.compose(pos, quat, scl)
       this.poles.setMatrixAt(i, tmp)
