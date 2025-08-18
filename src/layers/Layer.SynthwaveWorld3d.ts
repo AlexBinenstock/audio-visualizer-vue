@@ -14,6 +14,7 @@ class SynthwaveWorld3D implements Layer {
     { kind:'slider', key:'fadeDepth',  label:'Depth Fade',  min:0.004,max:0.03, step:0.001, default:0.010 },
     { kind:'slider', key:'hue',        label:'Neon Hue',    min:0.70, max:0.98, step:0.001, default:0.86  },
     { kind:'toggle', key:'tiltCamera', label:'Tilt Camera', default:true },
+    { kind:'slider', key:'emissive', label:'Emissive', min:0.2, max:3.0, step:0.05, default:1.0 },
   ]
   state: Record<string, any> = {}
 
@@ -43,7 +44,7 @@ class SynthwaveWorld3D implements Layer {
       uWidth:     { value: this.state.lineWidth },
       uFadeDepth: { value: this.state.fadeDepth },
       uHue:       { value: this.state.hue },
-      uEmissive:  { value: 1.0 },
+      uEmissive:  { value: this.state.emissive },
     }
 
     const mat = new THREE.ShaderMaterial({
@@ -140,7 +141,7 @@ class SynthwaveWorld3D implements Layer {
     this.u.uWidth.value     = width
     this.u.uFadeDepth.value = fadeDepth
     this.u.uHue.value       = hue
-    this.u.uEmissive.value  = 0.85 + 1.2 * f.rmsPeak01
+    this.u.uEmissive.value  = (this.state.emissive as number) ?? 1.0
   }
 
   dispose(): void {
