@@ -15,10 +15,20 @@ class SynthwaveWorld3D implements Layer {
     { kind:'slider', key:'hue',        label:'Neon Hue',    min:0.70, max:0.98, step:0.001, default:0.86  },
     { kind:'toggle', key:'tiltCamera', label:'Tilt Camera', default:true },
     { kind:'slider', key:'emissive', label:'Emissive', min:0.2, max:3.0, step:0.05, default:1.0 },
+    { kind:'slider', key:'poleSpacing', label:'Pole Spacing (z)', min:2,  max:12, step:0.5, default:6 },
+    { kind:'slider', key:'poleHeight',  label:'Pole Height',      min:0.4,max:3.0, step:0.05, default:1.2 },
+    { kind:'slider', key:'poleXOffset', label:'Pole X Offset',    min:3.0,max:20,  step:0.1,  default:6.5 },
+    { kind:'slider', key:'poleGlow',    label:'Pole Glow',        min:0.2,max:3.0, step:0.05, default:1.4 },
+
   ]
   state: Record<string, any> = {}
 
   private grid!: THREE.Mesh
+  private poles!: THREE.InstancedMesh
+  private poleCount = 120 // enough to cover view; cheap with instancing
+  private poleMat!: THREE.MeshBasicMaterial
+  private poleGeom!: THREE.CylinderGeometry
+
   private u!: {
     uScroll:    { value: number }
     uStep:      { value: number }
@@ -114,6 +124,23 @@ class SynthwaveWorld3D implements Layer {
       ctx.camera.position.set(0, 1.1, 3.6)
       ctx.camera.lookAt(0, -0.35, -8.0)
     }
+
+    // --- Roadside poles (instanced) ---
+    const poleRadius = 0.05
+    const poleHeight = (this.state.poleHeight as number) ?? 1.2
+    this.poleGeom = new THREE.CylinderGeometry(poleRadius, poleRadius, poleHeight, 8, 1, true)
+    this.poleGeom.translate(0, poleHeight * 0.5, 0) // sit on ground
+    this.poleMat = new THREE.MeshBasicMaterial({
+      color: new THREE.Color().setHSL((this.state.hue as number) ?? 0.86, 1.0, 0.55),
+      transparent: true,
+      opacity: 0.95
+    })
+
+    this.poles = new THREE.InstancedMesh(this.poleGeom, this.poleMat, this.poleCount)
+    this.poles.instanceMatrix.setUsage(THREE.DynamicDrawUsage)
+    this.poles.frustumCulled = false
+    ctx.scene.add(this.poles)
+
   }
 
   setEnabled(on: boolean): void {
@@ -142,6 +169,50 @@ class SynthwaveWorld3D implements Layer {
     this.u.uFadeDepth.value = fadeDepth
     this.u.uHue.value       = hue
     this.u.uEmissive.value  = (this.state.emissive as number) ?? 1.0
+
+    // --- Update poles (wrap on scroll) ---
+    const spacing = (this.state.poleSpacing as number) ?? 6
+    const xOff    = (this.state.poleXOffset as number) ?? 6.5
+    const h       = (this.state.poleHeight as number) ?? 1.2
+    const glow    = (this.state.poleGlow   as number) ?? 1.4
+
+    // color can follow grid hue for cohesion (constant brightness)
+    this.poleMat.color.setHSL(hue, 1.0, 0.55)
+    this.poleMat.opacity = Math.min(1.5, glow) * 0.95
+
+    // compute z range to fill
+    // our plane center is around z=-8 .. looking toward -Z; we want poles from ~-2 in front to ~-120 back
+    const zFront = -2
+    const zBack  = -120
+
+    // align the first pole to scroll phase so movement matches the grid
+    // place N poles on both sides, interleaving left/right
+    const tmp = new THREE.Matrix4()
+    const quat = new THREE.Quaternion()
+    const scl = new THREE.Vector3(1,1,1)
+    const count = this.poleCount
+    const laneCount = 2
+
+    for (let i = 0; i < count; i++) {
+      // index along z
+      const stepIndex = Math.floor(i / laneCount)
+      // wrap so we keep them inside [zBack, zFront]
+      const zRaw = zFront - (stepIndex * spacing)
+      // tie to scroll so they flow (reversed to match grid direction)
+      let z = zRaw - (this.scroll % spacing)
+      // wrap if we went beyond zBack
+      while (z < zBack) z += ((Math.ceil((zBack - z) / spacing)) * spacing)
+
+      const isLeft = (i % 2) === 0
+      const x = (isLeft ? -xOff : xOff)
+      const y = 0 // on ground plane at y ~= -0.65; our pole geometry already sits on y=0, scene plane is translated
+
+      const pos = new THREE.Vector3(x, -0.65, z)  // match plane y translate
+      tmp.compose(pos, quat, scl)
+      this.poles.setMatrixAt(i, tmp)
+    }
+    this.poles.instanceMatrix.needsUpdate = true
+
   }
 
   dispose(): void {
