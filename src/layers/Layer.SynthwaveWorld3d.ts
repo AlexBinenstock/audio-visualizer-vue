@@ -24,6 +24,10 @@ class SynthwaveWorld3D implements Layer {
     { kind:'slider', key:'cols',           label:'Grid Columns',        min:64,   max:256,  step:1,     default:128 },
     { kind:'slider', key:'rows',           label:'Grid Rows',           min:64,   max:512,  step:1,     default:256 },
 
+    // --- Glass road controls ---
+    { kind:'slider', key:'glassWidth',     label:'Glass Width (world units)', min:1.0, max:40.0, step:0.5, default:6.0 },
+    { kind:'slider', key:'glassReflect',   label:'Glass Reflectivity',   min:0.0, max:2.0,  step:0.05, default:1.0 },
+
     // --- SUN controls ---
     { kind:'slider', key:'sunSize',        label:'Sun Size (world units)', min:2.0, max:30.0, step:0.1, default:12.0 },
     { kind:'slider', key:'sunY',           label:'Sun Elevation (world y)',min:0.0, max:20.0, step:0.1, default:7.5  },
@@ -44,6 +48,7 @@ class SynthwaveWorld3D implements Layer {
 
   private grid!: THREE.Mesh
   private gridDepth!: THREE.Mesh
+  private road!: THREE.Mesh
 
   private u!: {
     uScroll:    { value: number }
@@ -60,6 +65,10 @@ class SynthwaveWorld3D implements Layer {
     uRowHead:   { value: number }
     uHeightGain:{ value: number }
     uRowStepW:  { value: number }
+    uGlassWidth:   { value: number }
+    uGlassReflect: { value: number }
+    uSunPos:       { value: THREE.Vector3 }
+    uCamPos:       { value: THREE.Vector3 }
   }
 
   // --- Sun
@@ -129,6 +138,10 @@ class SynthwaveWorld3D implements Layer {
       uRowHead:   { value: this.rowHead },
       uHeightGain:{ value: (this.state.heightGain as number) ?? 1.0 },
       uRowStepW:  { value: this.rowStepWorld },
+      uGlassWidth:   { value: (this.state.glassWidth as number) ?? 6.0 },
+      uGlassReflect: { value: (this.state.glassReflect as number) ?? 1.0 },
+      uSunPos:       { value: new THREE.Vector3(0, (this.state.sunY as number) ?? 7.5, (this.state.sunZ as number) ?? -160) },
+      uCamPos:       { value: new THREE.Vector3() },
     }
 
     // Depth pre-pass: occlude sun wherever the grid plane is in front
@@ -152,6 +165,7 @@ class SynthwaveWorld3D implements Layer {
         precision highp float;
 
         out vec2 vXZ;
+        out vec3 vWorldPos;
         out float vViewZ;
 
         uniform sampler2D uHeightTex;
@@ -171,21 +185,26 @@ class SynthwaveWorld3D implements Layer {
 
           float h = texture(uHeightTex, texUV).r * uHeightGain;
 
-          vec4 mv = modelViewMatrix * vec4(position.x, position.y + h, position.z, 1.0);
+          vec4 world = modelMatrix * vec4(position.x, position.y + h, position.z, 1.0);
+          vec4 mv = viewMatrix * world;
           vViewZ = -mv.z;
           vXZ = vec2(position.x, position.z);
+          vWorldPos = world.xyz;
           gl_Position = projectionMatrix * mv;
         }
       `,
       fragmentShader: /* glsl */`
         precision highp float;
         in vec2 vXZ;
+        in vec3 vWorldPos;
         in float vViewZ;
         out vec4 outColor;
 
         uniform float uScroll, uStep, uWidth, uFadeDepth, uHue, uRowStepW;
         uniform float uLineBrightness, uLineAlpha, uHaloWidth, uHaloBoost;
         uniform int   uRowHead;
+        uniform float uGlassWidth, uGlassReflect;
+        uniform vec3  uSunPos, uCamPos;
 
         vec3 hsl2rgb(vec3 c){
           vec3 p = abs(fract(c.xxx + vec3(0., 2./3., 1./3.)) * 6. - 3.);
@@ -216,11 +235,27 @@ class SynthwaveWorld3D implements Layer {
           vec3 coreColor = baseColor * uLineBrightness;
           vec3 haloColor = coreColor * uHaloBoost;
 
+          // Glass road mask (inset inside roadWidth); use world X
+          float worldX = vWorldPos.x;
+          float glassHalf = max(0.0, uGlassWidth * 0.5);
+          float glassMask = 1.0 - smoothstep(glassHalf, glassHalf + 0.5, abs(worldX));
+
+          // Sun reflection as a stretched highlight aligned with Z
+          vec2 roadUV;
+          roadUV.x = abs(worldX) / max(glassHalf, 0.0001);
+          roadUV.y = (vWorldPos.z - uSunPos.z) / max(1.0, uRowStepW);
+          float centerBand = exp(-pow(roadUV.x, 2.0) * 8.0);
+          float stretch = 1.0 / (1.0 + 0.002 * (vWorldPos.z - uSunPos.z) * (vWorldPos.z - uSunPos.z));
+          float highlight = centerBand * stretch;
+          float reflectAmt = clamp(uGlassReflect, 0.0, 2.0) * highlight;
+          vec3 reflectColor = baseColor * (1.1 + 0.3 * clamp(uGlassReflect, 0.0, 2.0));
+          vec3 glassColor = reflectColor * reflectAmt * glassMask;
+
           float depthAlpha = exp(-uFadeDepth * vViewZ);
           float aCore = core * uLineAlpha * depthAlpha;
           float aHalo = halo * clamp(uLineAlpha, 0.0, 1.0) * depthAlpha;
 
-          vec3 rgb = coreColor * aCore + haloColor * aHalo;
+          vec3 rgb = coreColor * aCore + haloColor * aHalo + glassColor * depthAlpha;
           float a  = aCore + aHalo;
 
           outColor = vec4(rgb, a);
@@ -231,6 +266,95 @@ class SynthwaveWorld3D implements Layer {
     this.grid = new THREE.Mesh(geo, mat)
     this.grid.renderOrder = 1
     ctx.scene.add(this.grid)
+
+    // ----- Glass road mesh (separate material on top of grid) -----
+    const roadW = (this.state.glassWidth as number) ?? 6.0
+    const roadGeo = new THREE.PlaneGeometry(Math.max(0.1, roadW), this.WORLD_D, 2, 2)
+    roadGeo.rotateX(-Math.PI / 2)
+    roadGeo.translate(0, -0.65 + 0.01, -8.0) // slight lift to avoid z-fighting
+
+    const uRoad = {
+      uHeightTex: { value: this.hfTex },
+      uHFSize:    { value: new THREE.Vector2(this.hfW, this.hfH) },
+      uRowHead:   { value: this.rowHead },
+      uHeightGain:{ value: (this.state.heightGain as number) ?? 1.0 },
+      uScroll:    { value: 0 },
+      uRowStepW:  { value: this.rowStepWorld },
+      uSunPos:    { value: new THREE.Vector3(0, (this.state.sunY as number) ?? 7.5, (this.state.sunZ as number) ?? -160) },
+      uCamPos:    { value: new THREE.Vector3() },
+      uHueTop:    { value: (this.state.sunHueTop as number) ?? 0.08 },
+      uHueBot:    { value: (this.state.sunHueBot as number) ?? 0.92 },
+      uReflect:   { value: (this.state.glassReflect as number) ?? 1.0 },
+      uOpacity:   { value: 0.9 },
+    }
+
+    const roadMat = new THREE.ShaderMaterial({
+      uniforms: uRoad,
+      transparent: true,
+      premultipliedAlpha: true,
+      blending: THREE.NormalBlending,
+      depthWrite: true,
+      depthTest: true,
+      side: THREE.DoubleSide,
+      glslVersion: THREE.GLSL3,
+      vertexShader: /* glsl */`
+        precision highp float;
+        out vec3 vWorldPos;
+        void main(){
+          // Keep road perfectly flat; no heightfield displacement
+          vec4 world = modelMatrix * vec4(position.x, position.y, position.z, 1.0);
+          vWorldPos = world.xyz;
+          gl_Position = projectionMatrix * viewMatrix * world;
+        }
+      `,
+      fragmentShader: /* glsl */`
+        precision highp float;
+        in vec3 vWorldPos;
+        out vec4 outColor;
+
+        uniform vec3  uSunPos, uCamPos;
+        uniform float uRowStepW;
+        uniform float uReflect;
+        uniform float uOpacity;
+        uniform float uHueTop, uHueBot;
+
+        vec3 hsl2rgb(vec3 c){
+          vec3 p = abs(fract(c.xxx + vec3(0., 2./3., 1./3.)) * 6. - 3.);
+          vec3 rgb = c.z + c.y * (clamp(p - 1., 0., 1.) - 0.5) * (1. - abs(2.*c.z - 1.));
+          return rgb;
+        }
+
+        void main(){
+          vec3 N = vec3(0.0, 1.0, 0.0);
+          vec3 V = normalize(uCamPos - vWorldPos);
+          vec3 L = normalize(uSunPos - vWorldPos);
+          vec3 R = reflect(-L, N);
+
+          // Specular highlight for sun reflection
+          float spec = pow(max(dot(R, V), 0.0), 48.0);
+          float fres = pow(1.0 - max(dot(N, V), 0.0), 5.0);
+          float refl = clamp(uReflect, 0.0, 2.0) * (0.2 + 0.8 * spec) * (0.5 + 0.5 * fres);
+
+          // Sun color gradient reused for reflected highlight
+          float relY = clamp((uSunPos.y - vWorldPos.y) * 0.05 + 0.5, 0.0, 1.0);
+          vec3 sunBot = hsl2rgb(vec3(uHueBot, 0.95, 0.60));
+          vec3 sunTop = hsl2rgb(vec3(uHueTop, 0.95, 0.68));
+          vec3 sunCol = mix(sunBot, sunTop, relY);
+
+          // Soft center brightening along road center
+          float center = exp(-pow(vWorldPos.x / max(0.001, (gl_FrontFacing ? 1.0 : 1.0)), 2.0) * 2.0);
+
+          vec3 baseGlass = vec3(0.02, 0.03, 0.05);
+          vec3 color = baseGlass + sunCol * refl * (0.8 + 0.4 * center);
+          float alpha = clamp(uOpacity, 0.0, 1.0);
+          outColor = vec4(color, alpha);
+        }
+      `,
+    })
+
+    this.road = new THREE.Mesh(roadGeo, roadMat)
+    this.road.renderOrder = 2
+    ctx.scene.add(this.road)
 
     // ----- Sun (masked disc with scanlines) -----
     const sunGeo = new THREE.PlaneGeometry(1, 1, 1, 1) // scale later
@@ -347,6 +471,7 @@ class SynthwaveWorld3D implements Layer {
     if (this.grid) this.grid.visible = on
     if (this.gridDepth) this.gridDepth.visible = on
     if (this.sun)  this.sun.visible  = on
+    if (this.road) this.road.visible = on
   }
 
   update(ctx: LayerContext, f: Features): void {
@@ -370,6 +495,10 @@ class SynthwaveWorld3D implements Layer {
     this.u.uWidth.value     = width
     this.u.uFadeDepth.value = fadeDepth
     this.u.uHue.value       = hue
+    this.u.uGlassWidth.value   = (this.state.glassWidth as number) ?? 6.0
+    this.u.uGlassReflect.value = (this.state.glassReflect as number) ?? 1.0
+    this.u.uCamPos.value.copy(ctx.camera.position)
+    this.u.uSunPos.value.set(0, (this.state.sunY as number) ?? 7.5, (this.state.sunZ as number) ?? -160)
     this.u.uLineBrightness.value = (this.state.lineBrightness as number) ?? 1.25
     this.u.uLineAlpha.value      = (this.state.lineAlpha as number) ?? 1.0
     this.u.uHaloWidth.value      = (this.state.haloWidth as number) ?? 0.0
@@ -458,6 +587,20 @@ class SynthwaveWorld3D implements Layer {
     const sunZ    = (this.state.sunZ as number) ?? -80
     this.sun.position.set(0, sunY, sunZ)
     this.sun.scale.set(sunSize, sunSize, 1)
+
+    // Update road uniforms and width
+    const roadUniforms = (this.road.material as THREE.ShaderMaterial).uniforms as any
+    roadUniforms.uScroll.value = this.scroll
+    roadUniforms.uRowHead.value = this.rowHead
+    roadUniforms.uRowStepW.value = this.rowStepWorld
+    roadUniforms.uHeightGain.value = (this.state.heightGain as number) ?? 1.0
+    roadUniforms.uCamPos.value.copy(ctx.camera.position)
+    roadUniforms.uSunPos.value.set(0, sunY, sunZ)
+    roadUniforms.uReflect.value = (this.state.glassReflect as number) ?? 1.0
+    const targetWidth = Math.max(0.1, (this.state.glassWidth as number) ?? 6.0)
+    const currentWidth = (this.road.scale.x || 1.0) * ((this.road.geometry as THREE.PlaneGeometry).parameters.width || targetWidth)
+    const baseWidth = (this.road.geometry as THREE.PlaneGeometry).parameters.width || targetWidth
+    this.road.scale.x = targetWidth / Math.max(0.001, baseWidth)
   }
 
   dispose(): void {
@@ -475,6 +618,11 @@ class SynthwaveWorld3D implements Layer {
       this.sun.geometry.dispose()
       ;(this.sun.material as THREE.Material).dispose()
       this.sun.removeFromParent()
+    }
+    if (this.road) {
+      this.road.geometry.dispose()
+      ;(this.road.material as THREE.Material).dispose()
+      this.road.removeFromParent()
     }
   }
 }
