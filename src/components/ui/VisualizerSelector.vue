@@ -57,11 +57,6 @@ const visualizerOptions: VisualizerOption[] = [
     value: 'circle',
     label: 'Cannon Fireworks',
     icon: '🎆'
-  },
-  {
-    value: 'synth',
-    label: 'Synthwave World',
-    icon: '🌆'
   }
 ]
 
